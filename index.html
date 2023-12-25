@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+        <title>PM - A voice chat application that respects your privacy.</title>
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous">
+        <link href="index.css" rel="stylesheet">
+    </head>
+    <body class="bg-dark text-white d-flex">
+        <div class="d-flex flex-direction-row gap-3 flex-wrap ms-auto me-auto justify-content-center">
+            <div class="p-3 flex-md-1 w-45">
+                <div>
+                    <div class="mb-3">
+                        <label for="server" class="form-label">Server</label>
+                        <input type="text" class="form-control" id="server">
+                    </div>
+                    <div class="mb-3">
+                        <label for="port" class="form-label">Port</label>
+                        <input type="text" class="form-control" id="port" oninput="this.value = this.value.replace(/[^0-9.]/g, '').replace(/(\..*?)\..*/g, '$1'); if(this.value>65535){this.value = 65535;}" maxlength="5" placeholder="Default port for PM is 20979" value="20979">
+                    </div>
+                    <div class="mb-3">
+                        <label for="username" class="form-label">Username</label>
+                        <input type="text" class="form-control" id="username" maxlength="8">
+                    </div>
+                    <div class="mb-3">
+                        <label for="pgp-public" class="form-label">PGP public key (will be sent over to the server)</label>
+                        <input type="file" class="form-control" id="pgp-public">
+                    </div>
+                    <div class="mb-3">
+                        <label for="pgp-public" class="form-label">PGP private key (is kept and used in browser only)</label>
+                        <input type="file" class="form-control" id="pgp-private">
+                    </div>
+                    <div class="d-flex flex-row gap-3 flex-wrap">
+                        <button type="submit" class="btn btn-primary" onclick="connect()" id="connectbtn">Connect</button>
+                        <button class="btn btn-secondary" onclick="generate(prompt('Enter your E-mail'), prompt('Enter your name'))">Generate keys</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-3 flex-sm-2 w-45">
+                <div>
+                    <div class="mh-50 gap-2 d-flex flex-column" id="members">
+
+                    </div>
+                </div>
+            </div>
+            
+            <div class="p-3 flex-md-1 w-80 d-none" id="chat-outer">
+                <div>
+                    <div class="mh-30 gap-2 d-flex flex-column" id="chat-inner">
+                        <div class="card">
+                            <div class="card-body">
+                                <h5 class="card-title">PM</h5>
+                                <p class="card-text">Please connect to view the chat!</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="d-flex flex-row mt-3">
+                        <div class="form-floating w-100 h-4">
+                            <input type="text" class="form-control w-100" autocomplete="off" id="floatingMsg" placeholder="Message" style="height: 4rem;">
+                            <label for="floatingMsg">Message</label>
+                        </div>
+                        <button class="btn btn-primary h-4 w-4" onclick="uploadFile(); ">File</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            window.pageLoaded = false;
+            setInterval(()=>{window.pageLoaded = document.readyState === 'complete'; if(window.pageLoaded) onLoaded()}, 450);
+            let keys = {};
+
+            const onLoaded = ()=>{
+                document.getElementById('server').setAttribute('placeholder', `If empty - we\'ll connect to ${window.location.hostname}`)
+                document.getElementById('pgp-public').addEventListener('change', onReadFile);
+                document.getElementById('pgp-private').addEventListener('change', onReadFile);
+                document.getElementById('floatingMsg').addEventListener("keypress", (event)=>{    
+                    if(event.key == "Enter" && event.target.value != '' && window.ws_connected && window.oks >= 2 && window.pgplist != undefined){
+                        let txt = event.target.value;
+                        event.target.value = '';
+
+                        let packets = [];
+                        Object.keys(window.pgplist).forEach(async (e)=>{
+                            try{
+                                const key = window.pgplist[e];
+                                const encrypted = await openpgp.encrypt({
+                                    message: await openpgp.createMessage({ text: txt}), // input as Message object
+                                    encryptionKeys: await openpgp.readKey({ armoredKey: key}),
+                                });
+                                packets.push(`TEXT_${e}_${encrypted}`);
+                            }catch(e){
+                                console.warn(`Failed to generate packet for ${e}. This could be simple network issue, or somebody is trying to intercept this communication!`)
+                            }
+                            if(packets.length == Object.keys(window.pgplist).length){
+                                packets.forEach((packet)=>{
+                                    ws.send(packet);
+                                });
+                                delete packets;
+                            }
+                        });
+                    }
+                });
+            }
+
+            const uploadFile = async ()=>{
+                const fr = new FileReader();
+                let f = (await (await showOpenFilePicker())[0].getFile());
+                fr.readAsArrayBuffer(f);
+                fr.onloadend = ()=>{
+                    if(fr.result.byteLength > 500000000 && !confirm("Uploading files > 0.5GB might take a while. Continue?")){ return; }
+                    if(fr.result.byteLength > 4000000000){ alert("File size should be less than 4GB."); return; }
+                    alert("NOT IMPLEMENTED PROPERLY YET");
+                    delete f;
+                }
+            }
+
+            const uploadFile2 = async(url) =>{
+                let packets = [];
+                Object.keys(window.pgplist).forEach(async (e)=>{
+                    try{
+                        const key = window.pgplist[e];
+                        const encrypted = await openpgp.encrypt({
+                            message: await openpgp.createMessage({ text: url}), // input as Message object
+                            encryptionKeys: await openpgp.readKey({ armoredKey: key}),
+                        });
+                        packets.push(`FILE_${e}_${encrypted}`);
+                    }catch(e){
+                        console.warn(`Failed to generate packet for ${e}. This could be simple network issue, or somebody is trying to intercept this communication!`)
+                    }
+                    if(packets.length == Object.keys(window.pgplist).length){
+                        packets.forEach((packet)=>{
+                            ws.send(packet);
+                        });
+                        delete packets;
+                    }
+                });
+            }
+
+            const downloadFile = async (url)=>{
+                let newWin = window.open("about:blank", "Download file", "width=300,height=200");
+                newWin.document.write("<form method=\"POST\" action=\""+url.replace('http://', 'https://')+"\" id=\"form\"></form>\n<h1>File is now being downloaded!</h1><h3>This window will close in 5 seconds.</h3>");
+                newWin.document.getElementById('form').submit();
+                setTimeout(()=>{newWin.close();}, 5000);
+            }
+
+            const generate = async (email, name)=>{
+                if(email == 'undefined' || name == 'undefined' || email == null || name == null || email == '' || name == '') return;
+                try{
+                    const { privateKey, publicKey, revocationCertificate } = await openpgp.generateKey({
+                        type: 'ecc',
+                        curve: 'curve25519',
+                        userIDs: [{ name: name, email: email}], // you can pass multiple user IDs
+                        format: 'armored'
+                    });
+
+                    let file = `${privateKey}\n${publicKey}\n${revocationCertificate}`;
+                    let e = document.createElement('a');
+                    e.download = 'keys.txt';
+                    e.href = URL.createObjectURL(new Blob([file], {'type': 'text/plain'}));
+                    e.click();
+                    URL.revokeObjectURL(e.href);
+
+                    e.href = URL.createObjectURL(new Blob([privateKey], {'type': 'text/plain'}));
+                    e.download="private.txt";
+                    e.click();
+                    URL.revokeObjectURL(e.href);
+
+                    e.href = URL.createObjectURL(new Blob([publicKey], {'type': 'text/plain'}));
+                    e.download="public.txt";
+                    e.click();
+                    URL.revokeObjectURL(e.href);
+
+                    e.remove();
+                    delete file;
+
+                    keys['public'] = publicKey;
+                    keys['private'] = privateKey;
+                    document.getElementById('pgp-private').setAttribute('disabled', 'disabled');
+                    document.getElementById('pgp-public').setAttribute('disabled', 'disabled');
+                }catch(e){
+                    alert(e); return;
+                }
+            }
+
+            const onReadFile = (e)=>{
+                const fr = new FileReader();
+                let el = document.getElementById(e.target.id);
+                fr.readAsText(el.files[0]);
+                fr.onloadend = ()=>{
+                    keys[e.target.id.split('-')[1]] = fr.result;
+                }
+            }
+
+            const disableInputs = (val=true)=>{
+                let inputs = document.getElementsByTagName('input');
+                for (let index = 0; index < inputs.length; index++) {
+                    const element = inputs[index];
+                    if (element.id=='floatingMsg') continue;
+                    if(val)
+                        element.setAttribute('disabled', 'disabled');
+                    else
+                        element.removeAttribute('disabled');
+                }
+            }
+
+            const connect = () => {
+                if (keys=={}){
+                    alert("Import or generate keys.");
+                    return;
+                }
+
+                window.ws = new WebSocket(`ws${(window.location.protocol == 'https:') ? 's' : ''}://${(document.getElementById('server').value.trim() == '') ? window.location.hostname : document.getElementById('server').value}:${document.getElementById('port').value}`);
+                window.ws.onmessage = async (msg)=>{
+                    if (msg.data == 'OK')
+                        window.oks+=1;
+
+                    try{
+                        let data = JSON.parse(msg.data);
+                        if (data['type'] == 'pgplist'){
+                            window.pgplist = data['result'];
+                            window.waitPGPList = false;
+                        }else if(data['type'] == 'receive'){
+                            console.log(data);
+
+                            const pkey = await openpgp.readPrivateKey({ armoredKey: keys['private'] });
+                            const decrypted = await openpgp.decrypt({
+                                message: await openpgp.readMessage ({armoredMessage: data['message']}),
+                                decryptionKeys: pkey,
+                                format: 'binary'
+                            });
+                            let url = URL.createObjectURL(new Blob([decrypted.data], { type: 'audio/webm' }));
+                            let aud = new Audio(url);
+                            await aud.play();
+                            aud.addEventListener("ended", () => {
+                                aud.remove();
+                                URL.revokeObjectURL(url);
+                            });
+                        }else if(data['type'] == 'receive_msg'){
+                            let cid = `${Math.round(Math.random()*1000000)}${md5(JSON.stringify(data))}`;
+                            let nid = `${Math.round(Math.random()*1000000)}${md5(JSON.stringify(data))}`;
+                            const pkey = await openpgp.readPrivateKey({ armoredKey: keys['private'] });
+                            const decrypted = await openpgp.decrypt({
+                                message: await openpgp.readMessage ({armoredMessage: data['message']}),
+                                decryptionKeys: pkey
+                            });
+                            document.getElementById('chat-inner').innerHTML+=`<div class="card">
+                            <div class="card-body">
+                                <h5 class="card-title" id="name-${nid}"></h5>
+                                <p class="card-text" id="card-${cid}"></p>
+                            </div>
+                        </div>`;
+                            document.getElementById(`name-${nid}`).innerText = data['from'];
+                            document.getElementById(`card-${cid}`).innerText = decrypted.data;
+                            delete cid;
+                        }else if(data['type'] == 'receive_file'){
+                            let cid = `${Math.round(Math.random()*1000000)}${md5(JSON.stringify(data))}`;
+                            let nid = `${Math.round(Math.random()*1000000)}${md5(JSON.stringify(data))}`;
+                            const pkey = await openpgp.readPrivateKey({ armoredKey: keys['private'] });
+                            const decrypted = await openpgp.decrypt({
+                                message: await openpgp.readMessage ({armoredMessage: data['message']}),
+                                decryptionKeys: pkey
+                            });
+                            document.getElementById('chat-inner').innerHTML+=`<div class="card">
+                            <div class="card-body">
+                                <h5 class="card-title" id="name-${nid}"></h5>
+                                <p class="card-text" id="card-${cid}"></p>
+                            </div>
+                        </div>`;
+                            document.getElementById(`name-${nid}`).innerText = data['from'];
+                            document.getElementById(`card-${cid}`).innerText = decrypted.data;
+                            document.getElementById(`card-${cid}`).innerHTML = `<a href="javascript:downloadFile('${document.getElementById(`card-${cid}`).innerText}');">Download file</a>`;
+                            delete cid;
+                        }else if(data['type'] == 'file'){
+                            await uploadFile2(data['url']);
+                        }
+                    }catch(e){console.log(e)}
+                }
+                window.ws.onopen = (e)=>{
+                    alert("Connected.");
+                    document.getElementById('connectbtn').setAttribute('onclick', 'ws.close()');
+                    document.getElementById('connectbtn').innerText = 'Disconnect';
+                    document.getElementById('chat-outer').classList.remove('d-none');
+                    document.getElementById('chat-inner').innerHTML = '';
+                    disableInputs()
+                    window.ws_connected = true;
+                    window.oks = 0;
+                    window.ws.send(`USERNAME_${document.getElementById('username').value}`);
+                    window.ws.send(`PGP_${keys['public']}`);
+                    setInterval(()=>{if(window.oks >= 2 && window.waitPGPList != true) window.ws.send('PGPLIST'); window.waitPGPList = true; updMembers(); }, 500);
+                    init();
+                }
+                window.ws.onclose = (e)=>{
+                    alert("Disconnected.");
+                    disableInputs(false);
+                    document.getElementById('connectbtn').setAttribute('onclick', 'connect()');
+                    document.getElementById('connectbtn').innerText = 'Connect';
+                    document.getElementById('chat-outer').classList.add('d-none');
+                    document.getElementById('members').innerHTML = '';
+                    window.ws_connected = false;
+                }
+            }
+
+            const updMembers = ()=>{
+                let m = document.getElementById('members'); 
+                let outHTML = '';
+                let ids = [];
+                Object.keys(window.pgplist).forEach((e)=>{
+                    let cid = Math.round(Math.random()*1000000);
+                    ids.push({'id': cid, 'name': e});
+                    outHTML+=`<div class="alert alert-primary" role="alert">
+                            <span id="name_${cid}"></span> <span title="MD5 hash of user's public key">(${md5(window.pgplist[e])})</span>
+                        </div>`;
+                    delete cid;
+                });
+                if(outHTML!= m.innerHTML){
+                    m.innerHTML = outHTML;
+                }
+                ids.forEach((id)=>{
+                    document.getElementById(`name_${id['id']}`).innerText = id['name'];
+                });
+            }
+
+            const arrayBufferToBase64 = (arrayBuffer)=>{
+                return btoa(new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), ''));
+            }
+            
+            const buf2hex = (buffer, join="") => {
+                return [...new Uint8Array(buffer)].map(x => x.toString(16).padStart(2, '0')).join(join);
+            }
+
+            const hex2buf = (hex)=>{
+                return new Uint8Array(hex.match(/../g).map(h=>parseInt(h,16))).buffer
+            }
+
+            const init = async ()=>{
+                if(!window.pageLoaded){
+                    alert('Wait for page to load first.'); return;
+                }
+
+                navigator.mediaDevices.getUserMedia({
+                    audio: true
+                }).then(stream => {
+                    console.log(stream);
+                    const mediaRecorder = new MediaRecorder(stream);
+    
+                    mediaRecorder.addEventListener("dataavailable", async (event) => {
+                        if(event.data.size!=0){
+                            if(window.ws_connected && window.oks >= 2 && window.pgplist != undefined){
+                                let packets = [];
+                                let voicepacket = new Uint8Array(await event.data.arrayBuffer());
+                                Object.keys(window.pgplist).forEach(async (e)=>{
+                                    try{
+                                        const key = window.pgplist[e];
+                                        const encrypted = await openpgp.encrypt({
+                                            message: await openpgp.createMessage({ binary: voicepacket}), // input as Message object
+                                            encryptionKeys: await openpgp.readKey({ armoredKey: key}),
+                                        });
+                                        packets.push(`VOICE_${e}_${encrypted}`);
+                                    }catch(e){
+                                        console.warn(`Failed to generate packet for ${e}. This could be simple network issue, or somebody is trying to intercept this communication!`)
+                                    }
+                                    console.log(packets);
+                                    if(packets.length == Object.keys(window.pgplist).length){
+                                        packets.forEach((packet)=>{
+                                            ws.send(packet);
+                                        });
+                                        delete packets, voicepacket;
+                                    }
+                                });
+                            }
+                        }
+                    });
+    
+                    mediaRecorder.start();
+                    setInterval(()=>{mediaRecorder.requestData(); mediaRecorder.stop(); mediaRecorder.start();}, 125);
+                });
+            }
+       </script>
+       <script src="md5.min.js"></script>
+       <script src="openpgp.min.js"></script>
+       <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL" crossorigin="anonymous"></script>
+    </body>
+</html>
