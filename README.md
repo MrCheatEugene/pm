@@ -13,19 +13,18 @@ PM is a messenger that really, really respects your privacy.
 + You set up the server, and you can be 100% confident in your privacy.
 + Fully open source
 + Free to use or modify
++ Server can be password-protected
++ Some basic server administration (still in progress)
 - Limited to web
-- Not that much of funcionality (in comparison to other messengers)
+- Limited functionality (in comparison to Telegram or Whatsapp)
 - Only VC mode
-- Can't upload files
-- No server password-protection
-- No server administration
-- Only WSS
+- Files aren't encrypted
 ```
 
 # Set up
 1. Clone the repo
 2. `pip install websockets`
-3. Configure the SSL certificates at line 64 of index.py
+3. Configure the SSL certificates at line 115 of index.py, and passwords at line 14/15.
 4. `python3 index.py`
 
 # Usage
